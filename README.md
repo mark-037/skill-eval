@@ -62,6 +62,7 @@ pnpm run viewer                    # → http://localhost:3847
 tasks/superlint_demo/
 ├── task.toml              # Config: graders, timeouts, resource limits
 ├── instruction.md         # Agent prompt
+├── .env                   # Task-level env vars (optional)
 ├── environment/Dockerfile # Container setup
 ├── solution/solve.sh      # Reference solution (for --validate)
 ├── tests/test.sh          # Deterministic grader
@@ -136,6 +137,26 @@ Based on recommendations from [Demystifying Evals for AI Agents](https://www.ant
 - Every task should have a reference solution (`solution/solve.sh`) that proves solvability.
 - Test both positive and negative cases — a grader that always returns 1.0 is useless.
 - Start with 3–5 well-designed tasks rather than 50 noisy ones.
+
+## Environment Variables
+
+Environment variables are loaded from `.env` files and forwarded to the agent's execution environment (Docker container or local process). Loading order (later overrides earlier):
+
+1. **Root `.env`** — project-level secrets (API keys)
+2. **Task `.env`** (`tasks/<name>/.env`) — task-specific variables
+3. **Process env** — `GEMINI_API_KEY` and `ANTHROPIC_API_KEY` from the shell override everything
+
+```bash
+# Root .env
+GEMINI_API_KEY=your-key
+ANTHROPIC_API_KEY=your-key
+
+# tasks/my_task/.env
+CUSTOM_API_URL=https://internal.example.com
+DEBUG=true
+```
+
+All values are automatically **redacted** from persisted session logs.
 
 ## Security
 

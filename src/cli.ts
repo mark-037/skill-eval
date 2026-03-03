@@ -7,6 +7,37 @@ import { BaseAgent } from './types';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 
+/**
+ * Parse a .env file into a key-value record.
+ * Supports: KEY=VALUE, KEY="VALUE", KEY='VALUE', comments (#), blank lines.
+ */
+function parseEnvFile(content: string): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) continue;
+        const key = trimmed.substring(0, eqIdx).trim();
+        let value = trimmed.substring(eqIdx + 1).trim();
+        // Strip surrounding quotes
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.slice(1, -1);
+        }
+        env[key] = value;
+    }
+    return env;
+}
+
+async function loadEnvFile(filePath: string): Promise<Record<string, string>> {
+    if (await fs.pathExists(filePath)) {
+        const content = await fs.readFile(filePath, 'utf-8');
+        return parseEnvFile(content);
+    }
+    return {};
+}
+
 async function main() {
     const args = process.argv.slice(2);
     const taskArg = args[0];
@@ -37,10 +68,18 @@ async function main() {
     const provider = providerType === 'docker' ? new DockerProvider() : new LocalProvider();
     const resultsDir = path.join(__dirname, '..', 'results');
 
-    // Forward all environment variables
-    const env: Record<string, string> = {};
-    if (process.env.GEMINI_API_KEY) env.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (process.env.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    // Load root .env file
+    const rootDir = path.join(__dirname, '..');
+    const rootEnv = await loadEnvFile(path.join(rootDir, '.env'));
+
+    // Build env: root .env → process env overrides
+    const baseEnv: Record<string, string> = { ...rootEnv };
+    if (process.env.GEMINI_API_KEY) baseEnv.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (process.env.ANTHROPIC_API_KEY) baseEnv.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+    if (Object.keys(rootEnv).length > 0) {
+        console.log(`Loaded .env: ${Object.keys(rootEnv).join(', ')}`);
+    }
 
     // Determine tasks to run
     const tasksDir = path.join(__dirname, '..', 'tasks');
@@ -87,6 +126,14 @@ async function main() {
     for (const taskName of taskNames) {
         const taskPath = path.join(tasksDir, taskName);
         const runner = new EvalRunner(provider, resultsDir);
+
+        // Load task-level .env (overrides root .env)
+        const taskEnv = await loadEnvFile(path.join(taskPath, '.env'));
+        const env: Record<string, string> = { ...baseEnv, ...taskEnv };
+
+        if (Object.keys(taskEnv).length > 0) {
+            console.log(`Loaded ${taskName}/.env: ${Object.keys(taskEnv).join(', ')}`);
+        }
 
         // Auto-discover skills
         const skillsPaths: string[] = [];
